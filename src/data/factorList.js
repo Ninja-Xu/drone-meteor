@@ -1,0 +1,112 @@
+export default [{
+  name: '温度',
+  prop: 'temp',
+  show: 'always',
+  _id: 1
+}, {
+  name: '湿度',
+  prop: 'RH',
+  show: 'always',
+  _id: 2
+}, {
+  name: '风速',
+  prop: 'wind',
+  show: 'always',
+  _id: 3
+}, {
+  name: '风向',
+  prop: 'windD',
+  show: '2d',
+  _id: 4
+}, {
+  name: '垂直气流',
+  prop: 'bz_czl',
+  show: 'always',
+  _id: 5
+}, {
+  name: '水平覆盖',
+  prop: 'cloud',
+  show: 'always',
+  _id: 6
+}, {
+  name: '水平范围',
+  prop: 'cloud_area',
+  show: 'always',
+  _id: 7
+}, {
+  name: '空气密度',
+  prop: 'midu',
+  show: 'always',
+  _id: 8
+}, {
+  name: '雨量',
+  prop: 'water',
+  show: 'always',
+  _id: 9
+}, {
+  name: '垂直密度',
+  prop: 'cloud_midu',
+  show: 'always',
+  _id: 10
+}, {
+  name: '云层高度',
+  prop: 'cloud_height',
+  show: '3d',
+  _id: 11
+}, {
+  name: '气压',
+  prop: 'pre',
+  show: 'always',
+  single: true,
+  _id: 12
+}, {
+  name: '能见度',
+  prop: 'vis',
+  show: '2d',
+  single: true,
+  _id: 13
+}, {
+  name: '云水含量',
+  prop: 'bz_yun_shui',
+  show: '2d',
+  single: true,
+  _id: 14
+}, {
+  name: '水汽含量',
+  prop: 'bz_shui_qi',
+  show: '2d',
+  single: true,
+  _id: 15
+}, {
+  name: '雾',
+  prop: 'frog',
+  show: '2d',
+  single: true,
+  _id: 16
+}, {
+  name: '雪',
+  prop: 'bz_snow',
+  show: '2d',
+  single: true,
+  _id: 17
+}, {
+  name: '天气',
+  prop: 'weather',
+  show: '2d',
+  _id: 18
+}, {
+  name: '云层类型',
+  prop: 'cloud_type',
+  show: '2d',
+  _id: 19
+}, {
+  name: '霾',
+  prop: 'haze',
+  show: '2d',
+  _id: 20
+}, {
+  name: '比湿',
+  prop: 'sh',
+  show: '2d',
+  _id: 21
+}]
