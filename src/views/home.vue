@@ -140,6 +140,49 @@
       </div>
       <div class="viewer-container">
         <div class="viewer">
+          <div
+            class="forecast-popup"
+            v-if="forecastPopup.isVisible"
+            :style="forecastPopup.position"
+          >
+            <div class="header">
+              <span>{{ forecastPopup.data.name }} 预报数据</span>
+              <span class="close-btn" @click="closeForecastPopup">&times;</span>
+            </div>
+            <div class="timestamp">数据时间: {{ forecastPopup.data.time }}</div>
+            <div class="grid">
+              <div class="item">
+                <img src="/images/icon-temp.png" alt="" class="icon" />
+                <span class="value">{{ forecastPopup.data.temp }}</span>
+                <span class="label">温度</span>
+              </div>
+              <div class="item">
+                <img src="/images/icon-winddir.png" alt="" class="icon" />
+                <span class="value">{{
+                  forecastPopup.data.windDirection
+                }}</span>
+                <span class="label">平均风向</span>
+              </div>
+              <div class="item">
+                <img src="/images/icon-windspeed.png" alt="" class="icon" />
+                <span class="value">{{ forecastPopup.data.windSpeed }}</span>
+                <span class="label">平均风速</span>
+              </div>
+              <div class="item">
+                <img src="/images/icon-humidity.png" alt="" class="icon" />
+                <span class="value">{{ forecastPopup.data.humidity }}</span>
+                <span class="label">湿度</span>
+              </div>
+            </div>
+          </div>
+          <div class="drone-info-popup" v-if="false" :style="droneInfoPosition">
+            <div class="info-header">
+              <span class="location-name">{{ droneInfo.locationName }}</span>
+              <span class="flight-time"
+                >预计飞行时间 {{ droneInfo.flightTime }} 分钟</span
+              >
+            </div>
+          </div>
           <div class="drone-live-view-popup" v-if="isDroneLiveViewVisible">
             <div class="header">
               <span>无人机飞行实况</span>
@@ -251,6 +294,28 @@
               </div>
               <div class="content" v-show="isToolShow">
                 <div class="line">
+                  <span class="name">飞行控制</span>
+
+                  <div class="flight-controls">
+                    <button @click="toggleFlightAnimation" class="control-btn">
+                      <template v-if="isDroneFlying">
+                        <img
+                          src="/images/icon-pause.png"
+                          alt="Pause"
+                          class="icon"
+                        />
+                      </template>
+                      <template v-else>
+                        <img
+                          src="/images/icon-play.png"
+                          alt="Play"
+                          class="icon"
+                        />
+                      </template>
+                    </button>
+                  </div>
+                </div>
+                <div class="line">
                   <span class="name">地图切换</span>
                   <ul class="tab">
                     <li
@@ -331,6 +396,35 @@
                   :material="flightPathMaterial"
                 ></vc-graphics-polyline>
               </vc-entity>
+              <vc-entity
+                v-for="(point, index) in selectedRoute.midpoints"
+                :key="'midpoint-' + index"
+                :id="'midpoint-' + index"
+                :position="point"
+                :description="
+                  JSON.stringify({
+                    type: 'midpoint',
+                    name: point.name,
+                    location: point.location,
+                  })
+                "
+              >
+                <vc-graphics-billboard
+                  image="/images/icon-intermediate.png"
+                  :scale="0.1"
+                  :verticalOrigin="1"
+                  :disableDepthTestDistance="Number.POSITIVE_INFINITY"
+                ></vc-graphics-billboard>
+                <vc-graphics-label
+                  :text="point.name"
+                  font="18px Microsoft YaHei"
+                  fillColor="white"
+                  :pixelOffset="[0, 40]"
+                  :showBackground="true"
+                  backgroundColor="rgba(0, 0, 0, 0.5)"
+                  :backgroundPadding="[7, 5]"
+                ></vc-graphics-label>
+              </vc-entity>
 
               <vc-entity
                 :id="'start-point-' + selectedRoute.id"
@@ -389,8 +483,8 @@
               </vc-entity>
 
               <vc-entity
+                :id="'drone'"
                 :position="dronePosition"
-                :orientation="droneOrientation"
                 :description="JSON.stringify({ type: 'drone' })"
               >
                 <vc-graphics-billboard
@@ -503,18 +597,6 @@
                 ></vc-graphics-polygon>
               </vc-entity>
             </template>
-            <vc-primitive :appearance="appearance" v-if="false" :show="false">
-              <vc-instance-geometry
-                :geometry.sync="geometry"
-                :attributes="attributes"
-              >
-                <vc-geometry-outline-wall
-                  ref="wallOutline"
-                  :positions="positionsOutline"
-                  :vertexFormat="vertexFormat"
-                ></vc-geometry-outline-wall>
-              </vc-instance-geometry>
-            </vc-primitive>
             <vc-handler-draw-polygon
               :clamp-to-ground="true"
               ref="handlerPolygon"
@@ -525,16 +607,13 @@
           </vc-viewer>
         </div>
       </div>
-      <el-dialog width="80%" :visible.sync="dialogVisible"> </el-dialog>
-      <el-dialog :visible.sync="factorVisible"> </el-dialog>
     </div>
   </div>
 </template>
 <script>
 import * as turf from "@turf/helpers";
 import pointsWithinPolygon from "@turf/points-within-polygon";
-import fileDownload from "js-file-download";
-import $api, { ROOT, BASE } from "../api";
+import $api, { ROOT } from "../api";
 import factorList from "@/data/factorList";
 import {
   temp_legend_list,
@@ -647,207 +726,20 @@ export default {
         }
       }, 300);
     };
-    // let districtTile = `${BASE}/map/{z}/{x}/{y}/tile.png`;
     let districtTile = `cia_c`;
     return {
-      fileList: [],
-      timer: null,
-      isFlag: false,
-      factorVisible: false,
-      docUrl: `${ROOT}/swagger-ui/index.html`,
-      dialogVisible: false,
-      configController: {
-        isFinding: false,
-        searchForm: {
-          date: "",
-          location: "",
-          filters: [],
-          rules: {
-            location: [
-              {
-                validator: (_, value, callback) => {
-                  if (!value) {
-                    return callback(new Error("地点不能为空"));
-                  }
-                  setTimeout(() => {
-                    let result = value.match(
-                      /^(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/ //eslint-disable-line
-                    );
-                    if (!result) {
-                      return callback(new Error("请输入规范的地点经纬度"));
-                    }
-                    callback();
-                  }, 100);
-                },
-                trigger: "blur",
-              },
-            ],
-          },
-        },
-        filterResList: [],
-        schemeList: [],
-        isSS: false,
-        dateFormat: "yyyy-MM-dd HH",
-        searchDateFormat: "yyyy-MM-dd HH:mm",
-        year: "",
-        addr: {},
-        factorList: [],
-        factorOptionList: [],
-        time: [],
-        step: 0,
-        form: {
-          activeIndex: -1,
-          name: "",
-          time: "",
-          element: {},
-          height: "",
-          lon: "",
-          lat: "",
-          step: "",
-        },
-        rules: {
-          height: [
-            {
-              validator: (_, value, callback) => {
-                if (!value) {
-                  return callback(new Error("高度范围不能为空"));
-                }
-                setTimeout(() => {
-                  let result = value.match(
-                    /^[\(\[](\d+),(\d+)[\)\]]$/ //eslint-disable-line
-                  );
-                  if (!result) {
-                    return callback(new Error("请输入规范的高度范围"));
-                  }
-                  callback();
-                }, 100);
-              },
-              trigger: "blur",
-            },
-          ],
-          element: [
-            {
-              validator: (_, value, callback) => {
-                if (!value.prop) {
-                  return callback(new Error("气象要素不能为空"));
-                }
-                callback();
-              },
-              trigger: "blur",
-            },
-          ],
-          time: [
-            {
-              validator: (_, value, callback) => {
-                if (!value) {
-                  return callback(new Error("时间范围不能为空"));
-                }
-                setTimeout(() => {
-                  let result = value.match(
-                    /^[\(\[](\d{2}:\d{2}),(\d{2}:\d{2})[\)\]]$/ //eslint-disable-line
-                  );
-                  if (!result) {
-                    return callback(new Error("请输入规范的时间范围"));
-                  }
-                  callback();
-                }, 100);
-              },
-              trigger: "blur",
-            },
-          ],
-          step: [
-            {
-              validator: (_, value, callback) => {
-                if (!value) {
-                  return callback(new Error("变换数值不能为空"));
-                }
-                setTimeout(() => {
-                  if (!/^-?[0-9]+(.[0-9]+)?$/.test(value)) {
-                    return callback(new Error("请输入规范的变换数值"));
-                  } else {
-                    callback();
-                  }
-                }, 100);
-              },
-              trigger: "blur",
-            },
-          ],
-          lon: [
-            {
-              validator: (_, value, callback) => {
-                if (!value) {
-                  return callback(new Error("经度范围不能为空"));
-                }
-                setTimeout(() => {
-                  let result = value.match(
-                    /^[\(\[](\d+(?:\.\d+)?),(\d+(?:\.\d+)?)[\)\]]$/ //eslint-disable-line
-                  );
-                  if (!result) {
-                    return callback(new Error("请输入规范的经度范围"));
-                  }
-                  for (let i = 1, len = result.length; i < len; i++) {
-                    let v = result[i];
-                    if (
-                      +v > +this.configController.addr.elng ||
-                      +v < +this.configController.addr.slng
-                    ) {
-                      return callback(new Error("经度不在所选区域范围内"));
-                    }
-                  }
-                  callback();
-                }, 100);
-              },
-              trigger: "blur",
-            },
-          ],
-          lat: [
-            {
-              validator: (_, value, callback) => {
-                if (!value) {
-                  return callback(new Error("纬度范围不能为空"));
-                }
-                setTimeout(() => {
-                  let result = value.match(
-                    /^[\(\[](\d+(?:\.\d+)?),(\d+(?:\.\d+)?)[\)\]]$/ //eslint-disable-line
-                  );
-                  if (!result) {
-                    return callback(new Error("请输入规范的纬度范围"));
-                  }
-                  for (let i = 1, len = result.length; i < len; i++) {
-                    let v = result[i];
-                    if (
-                      +v > +this.configController.addr.slat ||
-                      +v < +this.configController.addr.elat
-                    ) {
-                      return callback(new Error("纬度不在所选区域范围内"));
-                    }
-                  }
-                  callback();
-                }, 100);
-              },
-              trigger: "blur",
-            },
-          ],
-        },
-        filters: [],
-        configList: [],
-      },
       units,
       isWindFiled: false,
       loading: true,
       isBoxShow: true,
       isGridShow: false,
-      // satelliteTile: `${BASE}/sate/{z}/{x}/{y}/tile.png`,
-      // districtTile:`${BASE}/map/{z}/{x}/{y}/tile.png`,
       satelliteTile: `img_c`,
       districtTile: `cia_c`,
-      terrainTile: `${BASE}/terrain`,
       isDistrict: districtTile,
       date: "2020-01-01 08:00:00",
       dateFormat: "yyyy-MM-dd HH:mm:ss",
       pickerOptions: {
         disabledDate: (time) => {
-          // 如果函数里处理的数据比较麻烦,也可以单独放在一个函数里,避免data数据太臃肿
           if (
             new Date(time) > new Date("2019-12-31 23:59:59") &&
             new Date(time) < new Date("2021-01-01 00:00:00")
@@ -888,8 +780,8 @@ export default {
       },
       wind_height_list,
       legend: {
-        wind_legend_list,
         temp_legend_list,
+        wind_legend_list,
         vis_legend_list,
         RH_legend_list,
         water_legend_list,
@@ -984,6 +876,7 @@ export default {
       isModified: false,
       allValue: 0,
       isToolShow: true,
+      isDroneFlying: false,
       flightRoutes: [
         {
           id: 1,
@@ -995,19 +888,45 @@ export default {
             { lng: 116.945477, lat: 39.761807, height: 2500 },
             { lng: 116.702929, lat: 39.566476, height: 2000 },
           ],
+          midpoints: [
+            {
+              id: "midpoint-1",
+              name: "沿线点1",
+              location: "燕郊镇",
+              lng: 117.001449,
+              lat: 39.912235,
+              height: 0,
+            },
+            {
+              id: "midpoint-2",
+              name: "沿线点2",
+              location: "大厂回族自治县",
+              lng: 116.945477,
+              lat: 39.761807,
+              height: 0,
+            },
+          ],
           startPoint: { lng: 117.20982, lat: 40.195766, height: 0 },
           endPoint: { lng: 116.702929, lat: 39.566476, height: 0 },
         },
       ],
       otherSites: [
-        // Decorative icons
         { name: "备降点1", position: { lng: 117.0, lat: 40.2, height: 0 } },
         { name: "备降点2", position: { lng: 116.5, lat: 39.5, height: 0 } },
       ],
       selectedRouteId: null,
-      dronePosition: { lng: 117.0, lat: 40.2, height: 2500 }, // Default position
+      dronePosition: null,
       droneOrientation: null,
       showDroneInfo: false,
+      isDroneInfoVisible: false,
+      droneInfoPosition: {
+        left: "0px",
+        top: "0px",
+      },
+      droneInfo: {
+        locationName: "当前位置",
+        flightTime: 0,
+      },
       droneWeatherInfo: {
         name: "平谷金海湖机场",
         time: "2025-08-18 11:45",
@@ -1018,14 +937,25 @@ export default {
         visibility: 30,
         humidity: 20,
       },
-      flightPathMaterial: null, // For Cesium material object
-      isDroneLiveViewVisible: false,
-      droneInfo: {
-        locationName: "当前位置名称",
-        flightTime: 48, // in minutes
+      forecastPopup: {
+        isVisible: false,
+        data: {
+          name: "",
+          time: "",
+          temp: "N/A",
+          windDirection: "N/A",
+          windSpeed: "N/A",
+          humidity: "N/A",
+          pressure: "N/A",
+        },
+        position: {
+          left: "0px",
+          top: "0px",
+          display: "none",
+        },
       },
-
-      // RENAMED for clarity: this is now specifically for the weather station popup
+      flightPathMaterial: null,
+      isDroneLiveViewVisible: false,
       weatherStationPopup: {
         isVisible: false,
         data: {
@@ -1046,6 +976,7 @@ export default {
           display: "none",
         },
       },
+      dronePathProperty: null,
     };
   },
   computed: {
@@ -1121,7 +1052,10 @@ export default {
     isGridShow() {
       this.floorChangeHandler(this.ground.height);
     },
-    selectedRouteId(newId) {
+    selectedRouteId(newId, oldId) {
+      if (oldId !== null) {
+        this.stopAnimateDroneFlight();
+      }
       if (newId) {
         this.handleRouteChange();
       } else {
@@ -1130,18 +1064,122 @@ export default {
     },
   },
   created() {
-    this.isFlag = this.$route.query.flag;
     this.initBoxAndLabel();
     this.getBoxImage();
-    this.getConfigList();
   },
   beforeDestroy() {
-    this.resetTimer();
+    this.stopAnimateDroneFlight();
   },
   destroyed() {
     this.windy && this.windy.removeLines();
+    this.stopAnimateDroneFlight();
   },
   methods: {
+    // 启动无人机飞行路径动画
+    startFlight() {
+      this.stopAnimateDroneFlight();
+      if (!this.viewer || !this.selectedRoute) return;
+
+      const { Cesium, viewer } = this;
+      const routePath = this.selectedRoute.path;
+      const animationDurationSeconds = 60;
+
+      const start = Cesium.JulianDate.fromDate(new Date());
+      const stop = Cesium.JulianDate.addSeconds(
+        start,
+        animationDurationSeconds,
+        new Cesium.JulianDate()
+      );
+
+      viewer.clock.startTime = start.clone();
+      viewer.clock.stopTime = stop.clone();
+      viewer.clock.currentTime = start.clone();
+      viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+      // 移除 timeline.zoomTo，因为用户不希望显示时间线
+      // viewer.timeline.zoomTo(start, stop);
+
+      const sampledPosition = new Cesium.SampledPositionProperty();
+      const pathCartesians = routePath.map((p) =>
+        Cesium.Cartesian3.fromDegrees(p.lng, p.lat, p.height)
+      );
+
+      pathCartesians.forEach((pos, index) => {
+        const timeOffset =
+          (index / (pathCartesians.length - 1)) * animationDurationSeconds;
+        const time = Cesium.JulianDate.addSeconds(
+          start,
+          timeOffset,
+          new Cesium.JulianDate()
+        );
+        sampledPosition.addSample(time, pos);
+      });
+
+      this.dronePathProperty = sampledPosition;
+      this.dronePosition = sampledPosition;
+
+      // 添加无人机方向计算
+      const computeOrientation = (time, result) => {
+        const position = this.dronePathProperty.getValue(time);
+        const nextPosition = this.dronePathProperty.getValue(
+          Cesium.JulianDate.addSeconds(time, 1, new Cesium.JulianDate())
+        );
+        if (Cesium.defined(position) && Cesium.defined(nextPosition)) {
+          const heading = this.getHeading(position, nextPosition);
+          const hpr = new Cesium.HeadingPitchRoll(heading, 0, 0);
+          return Cesium.Transforms.headingPitchRollQuaternion(
+            position,
+            hpr,
+            result
+          );
+        }
+        return Cesium.Quaternion.IDENTITY;
+      };
+      this.droneOrientation = new Cesium.CallbackProperty(
+        computeOrientation,
+        false
+      );
+      viewer.scene.preRender.addEventListener(this.updateDroneInfo);
+
+      viewer.flyTo(viewer.entities.getById("drone"), {
+        duration: 1.5,
+        offset: new Cesium.HeadingPitchRange(
+          0.0,
+          -Cesium.Math.PI_OVER_FOUR,
+          5000
+        ),
+      });
+
+      this.viewer.clock.shouldAnimate = true;
+      this.isDroneFlying = true;
+    },
+    /**
+     * @description 切换飞行器的播放/暂停状态
+     * @issue:
+     * - 原始代码没有播放/暂停的控制，这里新增该功能
+     */
+    toggleFlightAnimation() {
+      if (this.isDroneFlying) {
+        this.viewer.clock.shouldAnimate = false;
+        this.isDroneFlying = false;
+      } else {
+        // 如果动画已经停止，从当前时间继续播放
+        this.viewer.clock.shouldAnimate = true;
+        this.isDroneFlying = true;
+      }
+    },
+
+    // 停止无人机飞行动画
+    stopAnimateDroneFlight() {
+      if (this.dronePathProperty) {
+        if (this.viewer && this.viewer.scene) {
+          this.viewer.scene.preRender.removeEventListener(this.updateDroneInfo);
+        }
+        this.dronePathProperty.removeAllSamples();
+        this.dronePathProperty = null;
+        this.dronePosition = null; // 清除无人机位置
+        this.droneOrientation = null; // 清除无人机方向
+      }
+    },
     closeDroneLiveView() {
       this.isDroneLiveViewVisible = false;
     },
@@ -1149,7 +1187,6 @@ export default {
       this.weatherStationPopup.data.name = entityData.stationName;
       this.weatherStationPopup.isVisible = true;
 
-      // Use $nextTick to ensure the popup is in the DOM before positioning
       this.$nextTick(() => {
         this.weatherStationPopup.position = {
           left: `${screenPosition.x}px`,
@@ -1157,37 +1194,86 @@ export default {
           display: "block",
         };
       });
+      this.closeForecastPopup();
     },
 
-    // NEW METHOD: To close the weather station popup
     closeWeatherStationPopup() {
       this.weatherStationPopup.isVisible = false;
     },
+    openForecastPopup(entityData, screenPosition) {
+      this.forecastPopup.isVisible = true;
+      // 模拟获取数据
+      this.fetchForecastData(entityData).then((data) => {
+        this.forecastPopup.data = {
+          name: data.name,
+          time: data.time,
+          temp: `${data.temp}℃`,
+          windDirection: `${data.windDirection}°`,
+          windSpeed: `${data.windSpeed}m/s`,
+          humidity: `${data.humidity}%`,
+          pressure: `${data.pressure}hPa`,
+        };
+      });
 
-    // NEW METHOD: To update the screen position of the drone's info window
-    updateDroneInfoPosition() {
-      if (!this.viewer || !this.selectedRoute) return;
+      this.$nextTick(() => {
+        this.forecastPopup.position = {
+          left: `${screenPosition.x}px`,
+          top: `${screenPosition.y}px`,
+        };
+      });
+      // 关闭其他弹窗
+      this.closeWeatherStationPopup();
+    },
 
-      // Convert the drone's 3D world coordinates to 2D screen coordinates
+    // 新增：关闭预报数据弹窗
+    closeForecastPopup() {
+      this.forecastPopup.isVisible = false;
+    },
+    updateDroneInfo() {
+      if (!this.viewer || !this.selectedRoute || !this.dronePosition) {
+        this.isDroneInfoVisible = false;
+        return;
+      }
+      this.isDroneInfoVisible = true;
+
+      // 获取当前时间
+      const currentTime = this.viewer.clock.currentTime;
+      const startTime = this.viewer.clock.startTime;
+      const stopTime = this.viewer.clock.stopTime;
+
+      // 计算飞行时间（模拟）
+      const elapsedTimeSeconds = this.Cesium.JulianDate.secondsDifference(
+        currentTime,
+        startTime
+      );
+      const totalTimeSeconds = this.Cesium.JulianDate.secondsDifference(
+        stopTime,
+        startTime
+      );
+      const remainingTimeMinutes = Math.floor(
+        (totalTimeSeconds - elapsedTimeSeconds) / 60
+      );
+
+      this.droneInfo.flightTime = Math.max(0, remainingTimeMinutes);
+
+      // 获取当前无人机的位置
+      const droneCartesian = this.dronePosition.getValue(currentTime);
+
+      // 将三维世界坐标转换为二维屏幕坐标
       const screenPosition =
         this.Cesium.SceneTransforms.wgs84ToWindowCoordinates(
           this.viewer.scene,
-          this.Cesium.Cartesian3.fromDegrees(
-            this.dronePosition.lng,
-            this.dronePosition.lat,
-            this.dronePosition.height
-          )
+          droneCartesian
         );
 
       if (screenPosition) {
         this.droneInfoPosition = {
           left: `${screenPosition.x}px`,
           top: `${screenPosition.y}px`,
-          display: "block",
         };
       } else {
-        // Hide the popup if the drone is off-screen
-        this.droneInfoPosition.display = "none";
+        // 如果无人机在屏幕外，则隐藏弹窗
+        this.isDroneInfoVisible = false;
       }
     },
     closeLiveView() {
@@ -1195,39 +1281,12 @@ export default {
     },
     handleRouteChange() {
       if (!this.selectedRoute || !this.viewer) return;
-
-      // 1. Update drone position to the middle of the path
-      const midPointIndex = Math.floor(this.selectedRoute.path.length / 2);
-      this.dronePosition = this.selectedRoute.path[midPointIndex];
-
-      // 2. Calculate drone orientation to follow the path
-      if (this.selectedRoute.path.length > 1) {
-        const p1 =
-          this.selectedRoute.path[midPointIndex - 1] ||
-          this.selectedRoute.path[0];
-        const p2 = this.selectedRoute.path[midPointIndex];
-        const position1 = this.Cesium.Cartesian3.fromDegrees(
-          p1.lng,
-          p1.lat,
-          p1.height
-        );
-        const position2 = this.Cesium.Cartesian3.fromDegrees(
-          p2.lng,
-          p2.lat,
-          p2.height
-        );
-        const heading = this.getHeading(position1, position2);
-        const pitch = 0;
-        const roll = 0;
-        const hpr = new this.Cesium.HeadingPitchRoll(heading, pitch, roll);
-        this.droneOrientation =
-          this.Cesium.Transforms.headingPitchRollQuaternion(position2, hpr);
-      }
-
-      // 3. Fetch weather for the new drone position
-      this.fetchDroneWeather(this.dronePosition);
-
-      // 4. Fly the camera to the new route
+      this.droneInfo.locationName = this.selectedRoute.locationName;
+      this.droneInfo.flightTime = 60; // 初始预计飞行时间为60分钟
+      this.isDroneInfoVisible = true;
+      this.isDroneFlying = true;
+      this.startFlight();
+      this.fetchDroneWeather(this.selectedRoute.path[0]);
       const positionsForBoundingSphere = this.selectedRoute.path.flatMap(
         (p) => [p.lng, p.lat, p.height]
       );
@@ -1238,10 +1297,8 @@ export default {
         this.Cesium.BoundingSphere.fromPoints(cartesianPositions);
 
       this.viewer.camera.flyToBoundingSphere(boundingSphere, {
-        duration: 1.5,
+        duration: 2.0,
       });
-
-      // 5. Show the info popup
       this.showDroneInfo = true;
     },
 
@@ -1258,8 +1315,6 @@ export default {
     },
 
     fetchDroneWeather(position) {
-      // This is a mock function. Replace with your actual API call.
-      // e.g., $api.getPointWeather({ lon: position.lng, lat: position.lat, ... })
       console.log(`Fetching weather for:`, position);
       const now = new Date();
       this.droneWeatherInfo = {
@@ -1278,16 +1333,33 @@ export default {
         humidity: (15 + Math.random() * 10).toFixed(0),
       };
     },
-    // --- END OF ADDED METHODS ---
+    fetchForecastData(point) {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          const now = new Date();
+          resolve({
+            name: point.location,
+            time: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+              2,
+              "0"
+            )}-${String(now.getDate()).padStart(2, "0")} ${String(
+              now.getHours()
+            ).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+            temp: (25 + Math.random() * 10).toFixed(1),
+            windDirection: (Math.random() * 360).toFixed(0),
+            windSpeed: (1 + Math.random() * 5).toFixed(1),
+            humidity: (40 + Math.random() * 20).toFixed(0),
+            pressure: (990 + Math.random() * 30).toFixed(1),
+          });
+        }, 500);
+      });
+    },
 
-    // --- MODIFIED ready() method ---
     ready(cesiumInstance) {
-      // Your original ready() logic...
       const { Cesium, viewer } = cesiumInstance;
       this.viewer = viewer;
       this.Cesium = Cesium;
       viewer.scene.globe.depthTestAgainstTerrain = true;
-      // map click event handler
       this.handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       const clickHandler = new Cesium.ScreenSpaceEventHandler(
         viewer.scene.canvas
@@ -1303,27 +1375,26 @@ export default {
                 entity.description.getValue(this.viewer.clock.currentTime)
               );
 
-              // If the clicked point is the start point, show the weather popup
               if (entityData.type === "start" || entityData.type === "end") {
                 this.openWeatherStationPopup(entityData, event.position);
-                return; // Prevent closing immediately
+                return;
+              }
+              if (entityData.type === "midpoint") {
+                this.openForecastPopup(entityData, event.position);
+                return;
               }
               if (entityData.type === "drone") {
                 this.isDroneLiveViewVisible = true;
                 return;
               }
-              // Add logic for other clickable points here if needed...
             } catch (e) {
               /* ignore */
             }
           }
         }
-
-        // If we click anywhere else, close the weather popup
         this.closeWeatherStationPopup();
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-      // box appearance
       const { PerInstanceColorAppearance, ColorGeometryInstanceAttribute } =
         Cesium;
       this.appearance = new PerInstanceColorAppearance({
@@ -1337,7 +1408,6 @@ export default {
         ),
       };
 
-      // Keep camera in a reasonable pitch range
       var minPitch = -Cesium.Math.PI_OVER_TWO;
       var maxPitch = 0;
       var minHeight = 200;
@@ -1349,11 +1419,9 @@ export default {
           this.viewer.camera._suspendTerrainAdjustment = false;
           this.viewer.camera._adjustHeightForTerrain();
         }
-        // Keep camera in a reasonable pitch range
         var pitch = this.viewer.camera.pitch;
         if (pitch > maxPitch || pitch < minPitch) {
           this.viewer.scene.screenSpaceCameraController.enableTilt = false;
-          // clamp the pitch
           if (pitch > maxPitch) {
             pitch = maxPitch;
           } else if (pitch < minPitch) {
@@ -1371,395 +1439,29 @@ export default {
           this.viewer.scene.screenSpaceCameraController.enableTilt = true;
         }
       });
-      // ... more of your original logic ...
-
-      // MODIFIED: Added logic for flight path material and pre-selection
       this.flightPathMaterial = new this.Cesium.PolylineGlowMaterialProperty({
         glowPower: 0.25,
         color: this.Cesium.Color.AQUAMARINE,
       });
-
-      // Pre-select the first route for demonstration
       this.selectedRouteId = 1;
     },
     createTransparentMaterial(imageUrl) {
-      // GUARD CLAUSE: If Cesium is not yet initialized, return nothing.
-      // Vue will re-render and call this again once Cesium is ready.
       if (!this.Cesium) {
         return undefined;
       }
-
-      // If there's no image URL, return a fully transparent color.
       if (!imageUrl) {
         return this.Cesium.Color.TRANSPARENT;
       }
-
-      // If everything is ready, create the semi-transparent material.
       return new this.Cesium.ImageMaterialProperty({
         image: imageUrl,
-        color: this.Cesium.Color.WHITE.withAlpha(0.6), // 60% Opacity
+        color: this.Cesium.Color.WHITE.withAlpha(0.6),
       });
-    },
-    searchClickHandler() {
-      this.$refs.dynamicValidateForm.validate((valid) => {
-        if (valid) {
-          let {
-            date: dateTime,
-            filters,
-            location,
-          } = this.configController.searchForm;
-          try {
-            let [lon, lat] = location.split(",");
-            let eleJson = JSON.stringify(
-              filters.map((f) => ({
-                element: f.field.prop,
-                num: f.value,
-              }))
-            );
-            $api.searchWeather({ dateTime, lon, lat, eleJson }).then((res) => {
-              if (res.code) {
-                this.$forceUpdate();
-                this.configController.filterResList = res.data;
-              }
-            });
-          } catch (e) {
-            console.log(e);
-          }
-        }
-      });
-    },
-    findToggleHandler() {
-      this.configController.isFinding = !this.configController.isFinding;
-    },
-    addFilter() {
-      this.configController.searchForm.filters.push({
-        field: {},
-        value: "",
-        key: Date.now(),
-      });
-    },
-    removeFilter(item) {
-      var index = this.configController.searchForm.filters.indexOf(item);
-      if (index !== -1) {
-        this.configController.searchForm.filters.splice(index, 1);
-      }
-    },
-    handleChange(_, fileList) {
-      this.fileList = fileList;
-    },
-    handleRemove(_, fileList) {
-      this.fileList = fileList;
-    },
-    addFilesHandler() {
-      let files = this.fileList;
-      if (files.length) {
-        Promise.all(
-          files
-            .filter((file) => file.status !== "success")
-            .map((f) => this.uploadFileHandler(f.raw))
-        ).then(() => {
-          this.fileList = [];
-        });
-      } else {
-        return this.$message({
-          message: "请选择数据文件",
-          type: "warning",
-        });
-      }
-    },
-    uploadFileHandler(file) {
-      const formData = new FormData();
-      formData.append("file", file);
-      return $api.uploadFile(formData).then((res) => {
-        if (res.code === 0) {
-          this.$message({
-            message: "数据文件导入成功",
-            type: "success",
-          });
-        } else {
-          return Promise.reject("文件上传失败，请稍候重试！");
-        }
-      });
-    },
-    resetTimer() {
-      this.timer && clearInterval(this.timer);
-    },
-    dataSearchHandler() {
-      let validateFieldList = [];
-      let filedList = ["element", "time", "lon", "lat"];
-      this.$refs.configForm.validateField(filedList, (msg) => {
-        if (!msg) {
-          validateFieldList.push(msg);
-          if (
-            validateFieldList.length == filedList.length &&
-            validateFieldList.every((item) => item === "")
-          ) {
-            let {
-              form: { time, element },
-              addr,
-              time: dateTime,
-            } = this.configController;
-            let [_, m, d] = dateTime[0].split(" ")[0].split("-"); // eslint-disable-line
-            let result = time.match(
-              /^[\(\[](\d{2}):\d{2},(\d{2}):\d{2}[\)\]]$/ // eslint-disable-line
-            );
-            let timeList = [];
-            let start = +result[1],
-              end = +result[2];
-            for (let i = start; i <= end; i++) {
-              if (i < 10) {
-                timeList.push("0" + i);
-              } else {
-                timeList.push(i);
-              }
-            }
-            $api
-              .getDataAtHeight({
-                isModified: false,
-                type: element.prop,
-                height: 0,
-                addrId: addr.id,
-                dateTime: `2020-${m}-${d} ${timeList[0]}`,
-              })
-              .then((res) => {
-                console.log(res);
-              });
-          }
-        }
-      });
-    },
-    toggleTaskHandler(task) {
-      let { id, status } = task,
-        promise;
-      if (status) {
-        promise = $api.configStartUp(id);
-      } else {
-        promise = $api.configStop(id);
-      }
-      promise.then((res) => {
-        if (res.code === 1) {
-          this.$message({ type: "success", message: "设置成功" });
-        }
-      });
-    },
-    schemeCopyHandler(data) {
-      this.configController.factorList = data.elements.split(",");
-      this.configController.step = 1;
-    },
-    schemeDownloadHandler(data) {
-      return $api.configDownloadFile(data.code).then((res) => {
-        fileDownload(res, `${data.name}.zip`);
-      });
-    },
-    schemeDeleteHandler(data) {
-      this.$confirm("此操作将删除该方案, 是否继续?", "提示", {
-        confirmButtonText: "确定",
-        cancelButtonText: "取消",
-        type: "warning",
-      })
-        .then(() => {
-          $api.configDelete(data.code).then((res) => {
-            if (res.code === 1) {
-              this.$message({ type: "success", message: "删除成功" });
-              this.getConfigList();
-            }
-          });
-        })
-        .catch(() => {
-          this.$message({
-            type: "info",
-            message: "已取消删除",
-          });
-        });
-    },
-    getConfigList() {
-      let promise;
-      if (this.configController.isSS) {
-        promise = $api.configGetSSList();
-      } else {
-        promise = $api.configGetFSSList();
-      }
-      promise.then((res) => {
-        if (res.code === 1) {
-          this.configController.schemeList = res.data.list.map((d) => {
-            return {
-              ...d,
-              _config: JSON.parse(d.config),
-              _elementsName: d.elements
-                .split(",")
-                .map((e) => this.factorList.find((f) => f.prop === e)?.name)
-                .join(","),
-            };
-          });
-          if (!this.configController.isSS) {
-            this.resetTimer();
-            if (res.data.list.some((d) => d.status === 0)) {
-              this.timer = setInterval(this.getConfigList, 5 * 1000);
-            }
-          }
-        }
-      });
-    },
-    resetConfigForm() {
-      this.configController.form.time = "";
-      this.configController.form.element = {};
-      this.configController.form.height = "";
-      this.configController.form.lon = "";
-      this.configController.form.lat = "";
-      this.configController.form.step = "";
-    },
-    addConfirmHandler() {
-      this.$refs.configForm.validate((valid) => {
-        if (valid) {
-          let { time, element, height, lon, lat, step, activeIndex } =
-            this.configController.form;
-          let obj = {
-            element: element.prop,
-            elementName: element.name,
-            _element: element,
-            time,
-            lon,
-            lat,
-            step,
-          };
-          if (!this.isElementSingle) {
-            obj.height = height;
-          }
-          if (activeIndex > -1) {
-            this.configController.configList.splice(activeIndex, 1, obj);
-            this.configController.form.activeIndex = -1;
-          } else {
-            this.configController.configList.push(obj);
-          }
-          // this.resetConfigForm();
-        } else {
-          return false;
-        }
-      });
-    },
-    addConfigHandler() {
-      let {
-        factorList,
-        addr,
-        year,
-        time: timeSpan,
-        form: { name },
-        configList,
-        isSS,
-      } = this.configController;
-      let [node] = this.$refs.areaSelect2.getCheckedNodes();
-      let areaName = node.path.map((d) => d.name).join("-");
-      let postData = {
-        name,
-        elements: factorList.join(","),
-        areaCode: addr.code,
-        areaName,
-        year,
-        config: JSON.stringify(configList),
-      };
-      let promise;
-      if (isSS) {
-        promise = $api.configAddSS(postData);
-      } else {
-        let [startDate, endDate] = timeSpan;
-        promise = $api.configAddFSS({
-          ...postData,
-          startDate,
-          endDate,
-        });
-      }
-      promise.then((res) => {
-        if (res.code === 1) {
-          this.$message({ type: "success", message: "方案提交成功" });
-          //reset form & back to config list page
-          this.resetConfigForm();
-          this.configController.form.name = "";
-          this.configController.addr = {};
-          this.configController.time = [];
-          this.configController.year = "";
-          this.configController.factorList = [];
-          this.configController.configList = [];
-          this.configController.step = 0;
-          this.getConfigList();
-        }
-      });
-    },
-    editConfigHandler(index) {
-      let v = this.configController.configList[index];
-      this.configController.form.time = v.time;
-      this.configController.form.element = v._element;
-      this.configController.form.lon = v.lon;
-      this.configController.form.lat = v.lat;
-      this.configController.form.height = v.height;
-      this.configController.form.step = v.step;
-      this.configController.form.activeIndex = index;
-    },
-    deleteConfigHandler(index) {
-      this.configController.configList.splice(index, 1);
-    },
-    tableFilterHandler(value, row, column) {
-      const property = column["property"];
-      return row[property] === value;
-    },
-    nextClickHandler() {
-      let {
-        addr,
-        year,
-        factorList,
-        time,
-        form: { name },
-      } = this.configController;
-      if (!name) {
-        return this.$message({
-          type: "warning",
-          message: "请输入方案名称",
-        });
-      }
-      if (!factorList.length) {
-        return this.$message({
-          type: "warning",
-          message: "请选择气象要素",
-        });
-      } else if (!addr.slng) {
-        return this.$message({
-          type: "warning",
-          message: "请选择区域",
-        });
-      } else if (!year) {
-        return this.$message({
-          type: "warning",
-          message: "请选择数据参考年限",
-        });
-      } else if (!this.configController.isSS && !time.length) {
-        return this.$message({
-          type: "warning",
-          message: "请选择数据时间",
-        });
-      } else {
-        this.configController.step = 2;
-        let filter = this.factorList.filter(
-          (f) => factorList.indexOf(f.prop) > -1
-        );
-        this.configController.factorOptionList = filter.map((f) => ({
-          ...f,
-          value: f.prop,
-          label: f.name,
-        }));
-        this.configController.filters = filter.map((f) => ({
-          ...f,
-          text: f.name,
-          value: f.name,
-        }));
-      }
     },
     toolClickHandler() {
       this.isToolShow = !this.isToolShow;
     },
     mapStyleClickHandler(type) {
       this.isDistrict = type;
-    },
-    mapDataClickHandler(flag) {
-      this.isModified = flag;
     },
     mapDisplayClickHandler(flag) {
       this.isGridShow = flag;
@@ -1795,12 +1497,8 @@ export default {
     activeEvt(_) {
       this[_.type] = _.isActive;
     },
-    movingEvt() {
-      // console.log(windowPosition);
-      // this.tooltip.showAt(windowPosition, '<p>左键绘制, 右键结束绘制.</p>')
-    },
+    movingEvt() {},
     drawEvt(result) {
-      // result.finished && this.tooltip.setVisible(false)
       if (result.finished) {
         let polygon = turf.polygon([
           [
@@ -1856,9 +1554,6 @@ export default {
       document.querySelector("#windycanvas").style.display = "none";
     },
     async renderWind() {
-      /**
-       *如果处于全球状态就设置为[]（只要有一个角获取不到坐标就表示全球状态，实时计算）
-       **/
       this.loading = true;
       let res = await $api.getWindField({
         dateTime: this.date,
@@ -1883,7 +1578,6 @@ export default {
         viewer = this.viewer;
       var container = this.$refs.cesiumViewer.viewerContainer;
       var globalExtent = [];
-      //获取当前三维窗口左上、右上、左下、右下坐标
       var getCesiumExtent = function () {
         var canvaswidth = container.offsetWidth,
           canvasheight = container.offsetHeight;
@@ -1910,12 +1604,10 @@ export default {
           viewer.scene
         );
         if (pick1 && pick2 && pick3 && pick4) {
-          //将三维坐标转成地理坐标---只需计算左下右上的坐标即可
           var geoPt1 =
             viewer.scene.globe.ellipsoid.cartesianToCartographic(pick2);
           var geoPt2 =
             viewer.scene.globe.ellipsoid.cartesianToCartographic(pick3);
-          //地理坐标转换为经纬度坐标
           var point1 = [
             (geoPt1.longitude / Math.PI) * 180,
             (geoPt1.latitude / Math.PI) * 180,
@@ -1924,8 +1616,6 @@ export default {
             (geoPt2.longitude / Math.PI) * 180,
             (geoPt2.latitude / Math.PI) * 180,
           ];
-          // console.log(point1,point2);
-          //此时说明extent需要分为东西半球
           if (point1[0] > point2[0]) {
             globalExtent = [
               point1[0],
@@ -1944,7 +1634,6 @@ export default {
           globalExtent = [];
         }
       };
-      // 开启监听器--无论对当前地球做的任何操作都会监听到
       viewer.scene.postRender.addEventListener(() => {
         getCesiumExtent();
       });
@@ -1952,7 +1641,6 @@ export default {
       var mouse_down = false;
       var mouse_move = false;
       var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-      //鼠标滚动、旋转后是否需要重新生成风场---如果需要，打开以下注释--旋转或者移动到北半球的时候计算会有问题
       handler.setInputAction(function () {
         if (!self.isWindFiled) {
           return;
@@ -1965,14 +1653,12 @@ export default {
           self.showWindy();
         }, 200);
       }, Cesium.ScreenSpaceEventType.WHEEL);
-      //鼠标左键、右键按下
       handler.setInputAction(function () {
         mouse_down = true;
       }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
       handler.setInputAction(function () {
         mouse_down = true;
       }, Cesium.ScreenSpaceEventType.RIGHT_DOWN);
-      //鼠标移动
       handler.setInputAction(function () {
         if (!self.isWindFiled) {
           return;
@@ -1982,7 +1668,6 @@ export default {
           mouse_move = true;
         }
       }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-      //鼠标左键、右键抬起
       handler.setInputAction(function () {
         if (!self.isWindFiled) {
           return;
@@ -2027,7 +1712,6 @@ export default {
       document.querySelector(".viewer").appendChild(windycanvas);
       resizeCanvas();
       container.onresize = resizeCanvas;
-      //风场的参数配置，除了canvas/viewer是必传项，其他可以不传，参数含义见windy.js
       var params = {
         Cesium: Cesium,
         viewer: viewer,
@@ -2045,9 +1729,6 @@ export default {
         lineWidth: 1,
       };
       self.windy = new CanvasWindy(res.data, params);
-    },
-    cascaderChangeHandler2() {
-      this.$refs.areaSelect2.dropDownVisible = false;
     },
     floorChangeHandler(level) {
       if (this.isGridShow) {
@@ -2129,11 +1810,6 @@ export default {
           this.getFloorImages();
         });
       }
-      // if (this.factor === "bz_czl") {
-      //   return $api
-      //     .draw({ type: "bz_czl", addrId: this.addrId, dateTime: this.date })
-      //     .then(console.log);
-      // }
       return this.floorChangeHandler(this.ground.height);
     },
     getFloorHeight() {
@@ -2160,20 +1836,6 @@ export default {
       this.max_height = res.max;
     },
     getFloorImages() {
-      // let start = this.custom_level_list.findIndex((l) => l.value == res.min);
-      // let end = this.custom_level_list.findIndex((l) => l.value == res.max);
-      // this.customSectionList = this.custom_level_list
-      //   .slice(start, end + 1)
-      //   .map(async (l) => {
-      //     let obj = JSON.parse(JSON.stringify(this.box.shang));
-      //     let res = await this.getImageAtHeightHelper(l.value);
-      //     return {
-      //       ...obj,
-      //       height: l.value,
-      //       url: `${ROOT}${res.data?.img}`,
-      //     };
-      //   });
-
       this.getImageAtHeight(this.min_height, "xia");
       this.getImageAtHeight(this.max_height, "shang");
     },
@@ -2202,9 +1864,6 @@ export default {
           id: "label_2",
         },
       ];
-      this.camera.position.lng = (max_lng + min_lng) / 2;
-      this.camera.position.lat = (max_lat + min_lat) / 2;
-      this.camera.position.height = this.addrId === 1 ? 10000000 : 1000000;
       this.positionsOutline = [
         { lng: max_lng, lat: max_lat, height: max_height * ratio },
         { lng: max_lng, lat: min_lat, height: max_height * ratio },
@@ -2283,19 +1942,14 @@ export default {
     sectionReady({ cesiumObject }) {
       this.sectionCesiumObject = cesiumObject;
     },
-    changedHandler() {
-      // this.viewer.flyTo(this.sectionCesiumObject);
-    },
+    changedHandler() {},
     cesiumClickHandler(event) {
-      // 屏幕坐标转世界坐标——关键点
       var ellipsoid = this.viewer.scene.globe.ellipsoid;
       var cartesian = this.viewer.camera.pickEllipsoid(
         event.position,
         ellipsoid
       );
-      //将笛卡尔坐标转换为地理坐标
       var cartographic = this.Cesium.Cartographic.fromCartesian(cartesian);
-      //将弧度转为度的十进制度表示
       var lon = this.Cesium.Math.toDegrees(cartographic.longitude);
       var lat = this.Cesium.Math.toDegrees(cartographic.latitude);
       lon = lon.toFixed(6);
@@ -2458,15 +2112,12 @@ export default {
 <style lang="less" scoped>
 @cyan: #16d0ff;
 @darkcyan: #0b5273;
-
-/* --- MODIFIED: Added new styles for the flight system UI --- */
 .main-container {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
 }
-
 .main-title {
   color: @cyan;
   font-size: 32px;
@@ -2475,50 +2126,20 @@ export default {
   font-weight: bold;
   text-shadow: 0 0 8px fade(@cyan, 50%);
 }
-
 .page {
   flex: 1;
-  min-height: 0; // Important for flex layout
+  min-height: 0;
   display: flex;
   align-items: center;
   height: 100%;
 }
-
 .viewer-container {
-  flex: 1; // Allow viewer to fill remaining space
+  flex: 1;
   min-width: 0;
 }
-/* In your <style> block */
-
-/* Drone Position Popup Style */
-.drone-position-popup {
+.forecast-popup {
   position: absolute;
-  transform: translate(-50%, -120%); /* Position above the drone */
-  background: rgba(4, 30, 57, 0.85);
-  border: 1px solid #16d0ff;
-  border-radius: 8px;
-  color: white;
-  padding: 8px 12px;
-  font-size: 14px;
-  white-space: nowrap;
-  z-index: 100;
-  pointer-events: none;
-  box-shadow: 0 0 10px fade(#16d0ff, 40%);
-
-  .location-name {
-    font-weight: bold;
-    color: #16d0ff;
-  }
-  .flight-time {
-    font-size: 12px;
-    color: #ccc;
-  }
-}
-
-/* Weather Station Popup Style */
-.weather-station-popup {
-  position: absolute;
-  width: 380px;
+  width: 340px;
   background: rgba(4, 30, 57, 0.9);
   border: 1px solid #16d0ff;
   border-radius: 8px;
@@ -2527,9 +2148,8 @@ export default {
   overflow: hidden;
   box-shadow: 0 0 15px fade(#16d0ff, 50%);
   pointer-events: auto;
-  transform: translate(20px, -50%); /* Offset from the clicked point */
+  transform: translate(20px, -50%);
   font-family: "Microsoft YaHei", sans-serif;
-
   .header {
     display: flex;
     align-items: center;
@@ -2538,17 +2158,6 @@ export default {
     font-size: 16px;
     font-weight: bold;
     color: #16d0ff;
-
-    .icon {
-      /* Placeholder for your icon, replace with background-image */
-      display: inline-block;
-      width: 24px;
-      height: 24px;
-      object-fit: cover;
-      object-position: top;
-      margin-right: 10px;
-    }
-
     .close-btn {
       margin-left: auto;
       cursor: pointer;
@@ -2560,29 +2169,166 @@ export default {
       }
     }
   }
-
   .timestamp {
     font-size: 12px;
     color: #aaa;
     padding: 8px 12px;
   }
-
   .grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     padding: 0 12px 12px 12px;
     gap: 10px;
   }
-
   .item {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-
+    background: fade(@darkcyan, 60%);
+    padding: 6px;
+    border-radius: 4px;
     .icon {
-      /* Placeholder for icons */
+      width: 28px;
+      height: 28px;
+      margin-bottom: 5px;
+    }
+    .value {
+      font-size: 14px;
+      font-weight: bold;
+      color: @cyan;
+    }
+    .label {
+      font-size: 12px;
+      color: #ccc;
+      margin-top: 2px;
+    }
+  }
+}
+.drone-info-popup {
+  position: absolute;
+  background: rgba(40, 52, 64, 0.9);
+  border: 1px solid #16d0ff;
+  border-radius: 6px;
+  color: white;
+  padding: 8px 12px;
+  z-index: 100;
+  pointer-events: none; /* 让鼠标可以穿透弹窗，点击后面的地图 */
+  box-shadow: 0 0 10px rgba(22, 208, 255, 0.4);
+  /* 使用伪元素创建小箭头 */
+  &::before {
+    content: "";
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-top: 10px solid #16d0ff;
+  }
+}
+
+.info-header {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+.location-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.flight-time {
+  font-size: 14px;
+  color: #16d0ff;
+  white-space: nowrap;
+}
+.drone-position-popup {
+  position: absolute;
+  transform: translate(-50%, -120%);
+  background: rgba(4, 30, 57, 0.85);
+  border: 1px solid #16d0ff;
+  border-radius: 8px;
+  color: white;
+  padding: 8px 12px;
+  font-size: 14px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 0 10px fade(#16d0ff, 40%);
+  .location-name {
+    font-weight: bold;
+    color: #16d0ff;
+  }
+  .flight-time {
+    font-size: 12px;
+    color: #ccc;
+  }
+}
+.weather-station-popup {
+  position: absolute;
+  width: 380px;
+  background: rgba(4, 30, 57, 0.9);
+  border: 1px solid #16d0ff;
+  border-radius: 8px;
+  color: #fff;
+  z-index: 101;
+  overflow: hidden;
+  box-shadow: 0 0 15px fade(#16d0ff, 50%);
+  pointer-events: auto;
+  transform: translate(20px, -50%);
+  font-family: "Microsoft YaHei", sans-serif;
+  .header {
+    display: flex;
+    align-items: center;
+    background: #0b5273;
+    padding: 8px 12px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #16d0ff;
+    .icon {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      object-fit: cover;
+      object-position: top;
+      margin-right: 10px;
+    }
+    .close-btn {
+      margin-left: auto;
+      cursor: pointer;
+      font-size: 24px;
+      font-weight: bold;
+      line-height: 1;
+      &:hover {
+        color: #ff4d4d;
+      }
+    }
+  }
+  .timestamp {
+    font-size: 12px;
+    color: #aaa;
+    padding: 8px 12px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 0 12px 12px 12px;
+    gap: 10px;
+  }
+  .item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    .icon {
       width: 28px;
       height: 28px;
       margin-bottom: 5px;
@@ -2598,12 +2344,10 @@ export default {
     }
   }
 }
-
 .viewer {
-  width: 100%; // Make viewer responsive
+  width: 100%;
   height: 100%;
   position: relative;
-
   .drone-live-view-popup {
     position: absolute;
     top: 20px;
@@ -2615,8 +2359,7 @@ export default {
     z-index: 101;
     box-shadow: 0 0 15px fade(#16d0ff, 50%);
     color: white;
-    pointer-events: auto; /* Allow interaction */
-
+    pointer-events: auto;
     .header {
       display: flex;
       justify-content: space-between;
@@ -2626,9 +2369,7 @@ export default {
       font-size: 16px;
       font-weight: bold;
     }
-
     .close-btn {
-      /* This class can be reused from other popups */
       cursor: pointer;
       font-size: 24px;
       font-weight: bold;
@@ -2638,7 +2379,6 @@ export default {
         color: #ff4d4d;
       }
     }
-
     .content {
       position: relative;
       img {
@@ -2659,17 +2399,36 @@ export default {
       }
     }
   }
-
   .tool {
     left: auto;
-    right: 20px; // Moved to the right
   }
-
+  .flight-controls {
+    .control-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(4, 30, 57, 0.8);
+      border: 1px solid @cyan;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 0 10px fade(@cyan, 40%);
+      transition: all 0.3s;
+      &:hover {
+        background: fade(@darkcyan, 80%);
+      }
+      .icon {
+        width: 20px;
+        height: 20px;
+      }
+    }
+  }
   .drone-info-popup {
     position: absolute;
     top: 50%;
     left: 50%;
-    transform: translate(60px, -160px); // Offset from drone model center
+    transform: translate(60px, -160px);
     width: 340px;
     background: rgba(4, 30, 57, 0.85);
     border: 1px solid @cyan;
@@ -2679,8 +2438,7 @@ export default {
     padding: 12px;
     font-family: "Microsoft YaHei", sans-serif;
     box-shadow: 0 0 15px fade(@cyan, 40%);
-    pointer-events: none; // Prevent it from capturing mouse events
-
+    pointer-events: none;
     .info-header {
       display: flex;
       justify-content: space-between;
@@ -2689,7 +2447,6 @@ export default {
       padding-bottom: 8px;
       border-bottom: 1px solid @darkcyan;
       margin-bottom: 10px;
-
       span:first-child {
         font-weight: bold;
         color: @cyan;
@@ -2699,13 +2456,11 @@ export default {
         color: #ccc;
       }
     }
-
     .info-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
       gap: 8px;
     }
-
     .info-item {
       display: flex;
       align-items: center;
@@ -2713,13 +2468,11 @@ export default {
       padding: 6px;
       border-radius: 4px;
       font-size: 14px;
-
       i {
         display: inline-block;
         width: 20px;
         height: 20px;
         margin-right: 8px;
-        // Placeholder icon styles - replace with your background-image URLs
         &.icon-temp {
           background-color: #ff5722;
         }
